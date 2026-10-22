@@ -33,6 +33,10 @@ class MediaError(ValueError):
     """An AML media value is invalid or exceeds a published limit."""
 
 
+class MediaLimitError(MediaError):
+    """Decoded media exceeds an AML byte limit."""
+
+
 @dataclass(frozen=True, slots=True)
 class MediaRef:
     sha256: str
@@ -65,13 +69,13 @@ def decode_image_data_uri(url: str) -> DecodedImage:
         raise MediaError("image_url.url must be an inline Base64 JPEG, PNG, or WebP Data URI")
     mime_type, encoded = match.groups()
     if len(encoded) > 4 * ((MAX_IMAGE_BYTES + 2) // 3) + 4:
-        raise MediaError("decoded image exceeds the 10 MiB limit")
+        raise MediaLimitError("decoded image exceeds the 10 MiB limit")
     try:
         data = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise MediaError("image Data URI contains invalid Base64") from exc
     if len(data) > MAX_IMAGE_BYTES:
-        raise MediaError("decoded image exceeds the 10 MiB limit")
+        raise MediaLimitError("decoded image exceeds the 10 MiB limit")
     if not data:
         raise MediaError("decoded image is empty")
 
@@ -120,7 +124,7 @@ def validate_request_media(
         image = decode_image_data_uri(part.image_url.url)
         total += image.byte_size
         if total > limit_bytes:
-            raise MediaError("decoded images exceed the 30 MiB Add-request limit")
+            raise MediaLimitError("decoded images exceed the 30 MiB Add-request limit")
         decoded.append(image)
     return decoded
 
