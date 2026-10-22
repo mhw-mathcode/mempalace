@@ -227,6 +227,15 @@ class StateStore:
             ).fetchone()
             return None if row is None else self._record_from_row(connection, row)
 
+    def load_add_request(self, request_id: str) -> AddRequest | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM memories WHERE request_id = ?", (request_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return AddRequest.model_validate_json(row["payload_json"])
+
     def hydrate_committed(
         self, ids: Sequence[str], user_id: str
     ) -> dict[str, MemoryRecord]:
