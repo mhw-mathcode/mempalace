@@ -85,6 +85,8 @@ def decode_image_data_uri(url: str) -> DecodedImage:
             with Image.open(BytesIO(data)) as image:
                 actual_format = image.format
                 image.verify()
+            with Image.open(BytesIO(data)) as image:
+                image.load()
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise MediaError("image has unsafe dimensions") from exc
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as exc:

@@ -9,6 +9,7 @@ from aml_adapter.schemas import ImagePart, ImageURL, TextPart
 
 class FakeEmbeddingFunction:
     def __init__(self) -> None:
+        self.dimension = 2
         self.document_inputs = []
         self.query_inputs = []
         self.image_inputs = []
@@ -40,6 +41,27 @@ def test_for_track_selects_mempalace_original_models(monkeypatch) -> None:
     EmbeddingAdapter.for_track(Track.MULTIMODAL)
 
     assert requested == ["minilm", "minilm", "embeddinggemma2"]
+
+
+def test_real_minilm_factory_uses_callable_document_protocol_without_inference(
+    monkeypatch,
+) -> None:
+    function = EmbeddingAdapter.for_track(Track.TEXTUAL).function
+    assert callable(function)
+    assert not hasattr(function, "embed_documents")
+    monkeypatch.setattr(
+        type(function),
+        "__call__",
+        lambda _self, values: [[1.0] * 384 for _value in values],
+    )
+    adapter = EmbeddingAdapter(Track.TEXTUAL, function)
+
+    vectors = adapter.embed_documents(
+        [VectorChild(id="v", memory_id="m", kind="text", value="document")]
+    )
+
+    assert len(vectors) == 1
+    assert len(vectors[0]) == 384
 
 
 def test_document_embedding_routes_text_and_native_images_in_source_order(monkeypatch) -> None:
@@ -154,3 +176,14 @@ def test_empty_query_output_fails_closed(monkeypatch) -> None:
 
     with pytest.raises(EmbeddingOutputError):
         EmbeddingAdapter.for_track(Track.TEXTUAL).embed_query("question", None)
+
+
+def test_model_dimension_is_enforced_across_document_and_query_calls() -> None:
+    function = FakeEmbeddingFunction()
+    adapter = EmbeddingAdapter(Track.TEXTUAL, function)
+    child = VectorChild(id="v", memory_id="m", kind="text", value="text")
+    assert adapter.embed_documents([child]) == [[0.6, 0.8]]
+
+    function.embed_query = lambda _values: [[1.0, 0.0, 0.0]]
+    with pytest.raises(EmbeddingOutputError, match="expected dimension 2"):
+        adapter.embed_query("question", None)

@@ -23,7 +23,9 @@ class VectorChild:
     value: str
 
 
-def _normalize_rows(raw, expected_rows: int) -> list[list[float]]:
+def _normalize_rows(
+    raw, expected_rows: int, expected_dimension: int
+) -> list[list[float]]:
     try:
         rows = [list(row) for row in raw]
     except (TypeError, ValueError) as exc:
@@ -37,6 +39,10 @@ def _normalize_rows(raw, expected_rows: int) -> list[list[float]]:
     dimension = len(rows[0])
     if dimension < 1 or any(len(row) != dimension for row in rows):
         raise EmbeddingOutputError("embedding output has an inconsistent dimension")
+    if dimension != expected_dimension:
+        raise EmbeddingOutputError(
+            f"embedding output has dimension {dimension}; expected dimension {expected_dimension}"
+        )
 
     normalized: list[list[float]] = []
     for row in rows:
@@ -63,6 +69,16 @@ class EmbeddingAdapter:
     def __init__(self, track: Track, function) -> None:
         self.track = track
         self.function = function
+        configured_dimension = getattr(function, "dimension", None)
+        if configured_dimension is None and track in {Track.TEXTUAL, Track.CODING}:
+            configured_dimension = 384
+        if (
+            isinstance(configured_dimension, bool)
+            or not isinstance(configured_dimension, int)
+            or configured_dimension < 1
+        ):
+            raise ValueError("embedding function must expose a positive integer dimension")
+        self.expected_dimension = configured_dimension
 
     @classmethod
     def for_track(cls, track: Track) -> EmbeddingAdapter:
@@ -80,12 +96,14 @@ class EmbeddingAdapter:
         vectors: list[list[float] | None] = [None] * len(children)
         if text_positions:
             values = [children[index].value for index in text_positions]
-            rows = _normalize_rows(self.function.embed_documents(values), len(values))
+            embed_documents = getattr(self.function, "embed_documents", None)
+            raw = embed_documents(values) if callable(embed_documents) else self.function(values)
+            rows = _normalize_rows(raw, len(values), self.expected_dimension)
             for index, vector in zip(text_positions, rows):
                 vectors[index] = vector
         for index in image_positions:
             raw = self.function.embed_image(children[index].value)
-            vectors[index] = _normalize_rows([raw], 1)[0]
+            vectors[index] = _normalize_rows([raw], 1, self.expected_dimension)[0]
         return self._validate_common_dimension(vectors)
 
     def embed_query(
@@ -93,7 +111,9 @@ class EmbeddingAdapter:
     ) -> list[list[float]]:
         if isinstance(query, str):
             text = _options_context(query, options)
-            return _normalize_rows(self.function.embed_query([text]), 1)
+            return _normalize_rows(
+                self.function.embed_query([text]), 1, self.expected_dimension
+            )
         if self.track is not Track.MULTIMODAL:
             raise ValueError("content-part queries are available only for the multimodal track")
 
@@ -102,15 +122,26 @@ class EmbeddingAdapter:
         for part in query:
             if isinstance(part, TextPart):
                 text = _options_context(part.text, options if not text_seen else None)
-                vectors.extend(_normalize_rows(self.function.embed_query([text]), 1))
+                vectors.extend(
+                    _normalize_rows(
+                        self.function.embed_query([text]), 1, self.expected_dimension
+                    )
+                )
                 text_seen = True
             elif isinstance(part, ImagePart):
-                vectors.extend(_normalize_rows([self.function.embed_image(part.image_url.url)], 1))
+                vectors.extend(
+                    _normalize_rows(
+                        [self.function.embed_image(part.image_url.url)],
+                        1,
+                        self.expected_dimension,
+                    )
+                )
         if options and not text_seen:
             vectors.extend(
                 _normalize_rows(
                     self.function.embed_query([_options_context("", options)]),
                     1,
+                    self.expected_dimension,
                 )
             )
         if not vectors:

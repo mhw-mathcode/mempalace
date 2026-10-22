@@ -1,8 +1,10 @@
 import json
 import logging
+from io import StringIO
 
 from fastapi.testclient import TestClient
 
+from aml_adapter.__main__ import configure_request_logging
 from aml_adapter.app import create_app
 from tests.test_api import ADD_PAYLOAD, SEARCH_PAYLOAD, FakeService, settings
 
@@ -55,3 +57,27 @@ def test_search_and_failure_logs_never_include_query_options_or_error_text(tmp_p
     assert "distinct-query-secret" not in serialized
     assert "distinct-option-secret" not in serialized
     assert "distinct-error-secret" not in serialized
+
+
+def test_cli_enables_standalone_json_request_logging() -> None:
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    logger = logging.getLogger("aml_adapter")
+    original_handlers = list(logger.handlers)
+    original_level = logger.level
+    original_propagate = logger.propagate
+    try:
+        logger.handlers.clear()
+        logger.setLevel(logging.WARNING)
+        logger.propagate = True
+
+        configure_request_logging(handler)
+        logger.info(json.dumps({"path": "/health", "status": 200}))
+
+        assert logger.isEnabledFor(logging.INFO)
+        assert logger.propagate is False
+        assert json.loads(stream.getvalue()) == {"path": "/health", "status": 200}
+    finally:
+        logger.handlers[:] = original_handlers
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate

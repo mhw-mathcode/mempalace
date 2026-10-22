@@ -33,6 +33,13 @@ def test_settings_apply_defaults_and_derive_storage_paths(tmp_path: Path) -> Non
     assert settings.media_dir == tmp_path.resolve() / "media"
 
 
+def test_pillow_is_a_runtime_dependency() -> None:
+    project = (Path(__file__).parents[1] / "pyproject.toml").read_text("utf-8")
+    runtime_metadata = project.split("[project.optional-dependencies]", maxsplit=1)[0]
+
+    assert '"pillow>=12.3.0"' in runtime_metadata
+
+
 def test_settings_reject_unknown_track(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="AML_TRACK"):
         Settings.from_env({"AML_TRACK": "academic", "AML_DATA_DIR": str(tmp_path.resolve())})

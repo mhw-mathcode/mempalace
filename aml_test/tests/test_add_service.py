@@ -98,6 +98,24 @@ def test_add_returns_exact_echo_and_commits_only_after_vector_visibility(tmp_pat
     assert vectors.contains_calls == [list(record.child_ids)]
 
 
+def test_truncated_jpeg_fails_before_state_blob_or_vector_writes(tmp_path) -> None:
+    raw = BytesIO()
+    Image.new("RGB", (8, 8), color=(20, 40, 60)).save(raw, format="JPEG")
+    image = "data:image/jpeg;base64," + base64.b64encode(raw.getvalue()[:-1]).decode("ascii")
+    instance, state, embedder, vectors = service(tmp_path, track=Track.MULTIMODAL)
+    request = add_request(
+        content=[{"type": "image_url", "image_url": {"url": image}}]
+    )
+
+    with pytest.raises(MediaError, match="decode"):
+        instance.add(request)
+
+    assert state.get_by_request_id(request.request_id) is None
+    assert not (tmp_path / "media").exists()
+    assert embedder.calls == []
+    assert vectors.upserts == []
+
+
 def test_multimodal_add_persists_images_after_pending_and_embeds_native_path(tmp_path) -> None:
     uri = png_uri()
     request = add_request(

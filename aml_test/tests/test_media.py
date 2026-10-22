@@ -78,6 +78,13 @@ def test_decode_rejects_corrupt_and_mime_mismatched_images() -> None:
         decode_image_data_uri(data_uri(image_bytes("PNG"), "image/jpeg"))
 
 
+def test_decode_rejects_jpeg_that_verifies_but_has_truncated_pixel_data() -> None:
+    truncated = image_bytes("JPEG")[:-1]
+
+    with pytest.raises(MediaError, match="decode"):
+        decode_image_data_uri(data_uri(truncated, "image/jpeg"))
+
+
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
     return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
 
