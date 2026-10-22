@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -8,8 +9,24 @@ from threading import Lock
 
 from .config import Track
 from .embeddings import EmbeddingAdapter, VectorChild
-from .media import MediaStore, search_content, validate_request_media
-from .schemas import AddRequest, AddResponse, TextPart, validate_add_for_track
+from .media import (
+    MAX_SEARCH_IMAGE_BYTES,
+    MediaStore,
+    search_content,
+    validate_request_media,
+)
+from .schemas import (
+    AddRequest,
+    AddResponse,
+    ImagePart,
+    ImageURL,
+    SearchItem,
+    SearchRequest,
+    SearchResponse,
+    TextPart,
+    validate_add_for_track,
+    validate_search_for_track,
+)
 from .state_store import StateStore, child_id_for, memory_id_for_request
 from .vector_store import VectorStore
 
@@ -97,6 +114,50 @@ class MemoryService:
             raise KeyError(request_id)
         return self.add(request)
 
+    def search(self, request: SearchRequest) -> SearchResponse:
+        validate_search_for_track(request, self.track)
+        query = self._localize_query(request.query)
+        query_vectors = self.embedding.embed_query(query, request.options)
+        candidate_limit = min(max(request.top_k * 4, request.top_k), 1000)
+        candidates = self.vector_store.query(
+            query_vectors,
+            request.user_id,
+            candidate_limit,
+        )
+
+        best_scores: dict[str, float] = {}
+        for candidate in candidates:
+            score = float(candidate.score)
+            if not math.isfinite(score):
+                continue
+            previous = best_scores.get(candidate.memory_id)
+            if previous is None or score > previous:
+                best_scores[candidate.memory_id] = score
+        ranked_ids = sorted(best_scores, key=lambda memory_id: (-best_scores[memory_id], memory_id))
+        hydrated = self.state.hydrate_committed(ranked_ids, request.user_id)
+
+        items: list[SearchItem] = []
+        response_media_bytes = 0
+        for memory_id in ranked_ids:
+            record = hydrated.get(memory_id)
+            if record is None:
+                continue
+            memory_media_bytes = sum(ref.byte_size for ref in record.media_refs)
+            if response_media_bytes + memory_media_bytes > MAX_SEARCH_IMAGE_BYTES:
+                break
+            items.append(
+                SearchItem(
+                    id=record.id,
+                    content=record.content,
+                    score=best_scores[memory_id],
+                    created_at=record.created_at,
+                )
+            )
+            response_media_bytes += memory_media_bytes
+            if len(items) >= request.top_k:
+                break
+        return SearchResponse(data=items)
+
     @staticmethod
     def _response(request: AddRequest) -> AddResponse:
         return AddResponse(
@@ -118,6 +179,21 @@ class MemoryService:
             if text:
                 rendered.append(f"role={message.role}\n{text}")
         return "\n\n".join(rendered)
+
+    def _localize_query(self, query):
+        if isinstance(query, str):
+            return query
+        decoded = iter(validate_request_media(query))
+        localized = []
+        for part in query:
+            if isinstance(part, ImagePart):
+                path = self.media_store.put(next(decoded))
+                localized.append(
+                    ImagePart(type="image_url", image_url=ImageURL(url=str(path)))
+                )
+            else:
+                localized.append(part)
+        return localized
 
     @staticmethod
     def _child_ids(memory_id: str, has_text: bool, image_count: int) -> list[str]:

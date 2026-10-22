@@ -20,6 +20,7 @@ from .schemas import ContentPart, ImagePart, Message, TextPart
 MIB = 1024 * 1024
 MAX_IMAGE_BYTES = 10 * MIB
 MAX_ADD_IMAGE_BYTES = 30 * MIB
+MAX_SEARCH_IMAGE_BYTES = 30 * MIB
 
 _DATA_URI = re.compile(
     r"\Adata:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]*={0,2})\Z"
