@@ -1,0 +1,38 @@
+[project]
+name = "mempalace-aml-adapter"
+version = "0.1.0"
+description = "Agent Memory Leaderboard commercial-track adapter for MemPalace"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "mempalace",
+    "uvicorn>=0.30,<1",
+]
+
+[project.optional-dependencies]
+multimodal = ["mempalace[embeddinggemma2]"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27,<1",
+    "pillow>=12.3.0",
+    "pytest>=7,<10",
+    "ruff==0.16.6",
+]
+
+[tool.uv.sources]
+mempalace = { path = "..", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["real_models: opt-in tests that load cached embedding models"]
+
+[tool.ruff]
+line-length = 100
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["aml_adapter"]
